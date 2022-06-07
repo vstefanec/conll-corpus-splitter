@@ -13,14 +13,48 @@ COMMENT_PATTERN = r'^#\s?(?P<attr_name>[^=]+?)(?:\s?=\s?(?P<attr_value>.+))?$'
 
 
 class CONLLCorpusIterator(object):
+    """
+    Class that implements iteration logic over CONLL corpus which can be composed of multiple files.
+
+    Properties
+    ----------
+    sample_count : int
+        Number of samples in the corpus.
+
+    Methods
+    -------
+    __iter__()
+        Iterates over the samples in the corpus.
+    """
     def __init__(self, *filenames, sample_start_pattern=r'^#\ssent_id\s?=',
-                 comment_pattern=COMMENT_PATTERN):
+                 comment_pattern=COMMENT_PATTERN, ignore_metadata_attributes=['global.columns']):
+        """
+        Parameters
+        ----------
+        filenames : tuple
+            List of input paths.
+        sample_start_pattern : str, optional
+            Regex matching the beggining of sample.
+        comment_pattern : str, optional
+            Regex matching the comment (metadata) line.
+        ignore_metadata_attributes : list, optional
+            List of metadata attributes which should be ignored.
+        """
         self.filenames = filenames
         self.comment_pattern = comment_pattern
         self.sample_start_pattern = sample_start_pattern
+        self.ignore_metadata_attributes = ignore_metadata_attributes
         self._sample_count = None
 
     def __iter__(self):
+        """
+        Iterates over the samples in the corpus.
+
+        Returns
+        ----------
+        (str, dict)
+            Returns 2-tuple of sample text and related metadata.
+        """
         with ExitStack() as stack:
             files = [stack.enter_context(open(filename, 'r')) for filename in self.filenames]
             line_index = -1
@@ -51,11 +85,12 @@ class CONLLCorpusIterator(object):
                         m = re.match(self.comment_pattern, line)
                         if m:
                             groups = m.groupdict()
-                            metadata[groups['attr_name']] = MetadataValue(
-                                groups['attr_value'],
-                                m.string[m.start():m.end()],
-                                line_index
-                            )
+                            if groups['attr_name'] not in self.ignore_metadata_attributes:
+                                metadata[groups['attr_name']] = MetadataValue(
+                                    value=groups['attr_value'],
+                                    text=m.string[m.start():m.end()],
+                                    line_no=line_index
+                                )
 
     def _count_samples(self):
         print('Counting samples...')
@@ -78,12 +113,45 @@ class CONLLCorpusIterator(object):
 
 def split_corpus(source, output_folder, test=0.3, dev=0.0, seed=None, cross_validation=False,
                  omit_metadata=False, output_filename=None, iterator_cls=CONLLCorpusIterator):
+    """
+    Splits the corpus into train, test and dev set.
+
+    Parameters
+    ----------
+    source : str
+        Source file or folder.
+    output_folder : str
+        Output folder.
+    test : float, optional
+        Size of the test set, expressed as a decimal proportion (default is 0.3).
+    dev : float, optional
+        Size of the dev set, expressed as a decimal proportion (default is 0.0).
+    seed : int, optional
+        Value for the random seed. If not provided, number of samples will be used.
+    cross_validation : bool, optional
+        Flag denoting whether k-fold cross-validation sets will be created (default is False).
+    omit_metadata : bool, optional
+        Flag denoting whether document and/or paragraph metadata will be omitted (default is False).
+    output_filename : str, optional
+        Filename for the output files. If not provided, filename will be the name of the source.
+    iterator_cls : class, optional
+        Corpus iterator class.
+
+    Returns
+    ----------
+    NoneType
+
+    Raises
+    ----------
+    ValueError
+        Raises an exception if there are inconsistencies in the parameters.
+    """
 
     test = float(test)
     dev = float(dev)
 
     if (test + dev) >= 1:
-        raise ValueError('Test set and dev set percentage together are greater than 1.')
+        raise ValueError('Test and dev set proportions together are greater than 1.')
 
     source = os.path.normpath(source)
 
@@ -149,8 +217,6 @@ def split_corpus(source, output_folder, test=0.3, dev=0.0, seed=None, cross_vali
                 datafold[sample_index] = Dataset.TRAIN
             elif sample_index in dev_samples:
                 datafold[sample_index] = Dataset.DEV
-            else:
-                raise RuntimeError()
 
         datafolds.append(datafold)
 
