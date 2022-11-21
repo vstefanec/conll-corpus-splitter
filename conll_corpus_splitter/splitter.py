@@ -26,8 +26,8 @@ class CONLLCorpusIterator(object):
     __iter__()
         Iterates over the samples in the corpus.
     """
-    def __init__(self, *filenames, sample_start_pattern=r'^#\ssent_id\s?=',
-                 comment_pattern=COMMENT_PATTERN, ignore_metadata_attributes=['global.columns']):
+    def __init__(self, *filenames, sample_start_pattern=r'^#\ssent_id\s?=', sample_end_pattern=r'\n',
+                 comment_pattern=COMMENT_PATTERN, ignore_metadata_attributes=['global.columns'], append_newline=True):
         """
         Parameters
         ----------
@@ -35,15 +35,21 @@ class CONLLCorpusIterator(object):
             List of input paths.
         sample_start_pattern : str, optional
             Regex matching the beggining of sample.
+        sample_end_pattern : str, optional
+            Regex matching the end of sample.
         comment_pattern : str, optional
             Regex matching the comment (metadata) line.
         ignore_metadata_attributes : list, optional
             List of metadata attributes which should be ignored.
+        append_newline : bool, optional
+            Append newline to every sample.
         """
         self.filenames = filenames
         self.comment_pattern = comment_pattern
         self.sample_start_pattern = sample_start_pattern
+        self.sample_end_pattern = sample_end_pattern
         self.ignore_metadata_attributes = ignore_metadata_attributes
+        self.append_newline = append_newline
         self._sample_count = None
 
     def __iter__(self):
@@ -64,15 +70,14 @@ class CONLLCorpusIterator(object):
                 reading_sample = False
                 for line in file:
                     line_index += 1
-                    if not line.strip() and reading_sample:
+                    if re.match(self.sample_end_pattern, line) and reading_sample:
                         # end of sample
+                        if self.append_newline:
+                            text_buffer += '\n'
                         yield text_buffer, metadata.copy()
                         reading_sample = False
                         text_buffer = ''
                         metadata = MetadataDiffDict()
-                    elif not line.strip():
-                        # empty line
-                        continue
                     elif reading_sample:
                         text_buffer += line
                     else:
@@ -273,6 +278,6 @@ def split_corpus(source, output_folder, test=0.3, dev=0.0, seed=None, cross_vali
                     for _, v in diff.items():
                         out_files[fold][destination].write('{}\n'.format(v.text))
 
-                out_files[fold][destination].write('{}\n'.format(sample))
+                out_files[fold][destination].write(sample)
 
     print('Done.')
